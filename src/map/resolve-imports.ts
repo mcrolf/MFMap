@@ -9,7 +9,7 @@ import type { FileEntry, ResolvedImport } from '../model.ts';
 export function resolveImports(entries: FileEntry[], project: ProjectContext): FileEntry[] {
   const resolvers = new Map<Ecosystem, ImportResolver | undefined>();
   const resolverFor = (ecosystem: Ecosystem): ImportResolver | undefined => {
-    if (!resolvers.has(ecosystem)) resolvers.set(ecosystem, RESOLVERS[ecosystem]?.(project));
+    if (!resolvers.has(ecosystem)) resolvers.set(ecosystem, RESOLVERS[ecosystem](project));
     return resolvers.get(ecosystem);
   };
 

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import ignore, { type Ignore } from 'ignore';
 
@@ -23,7 +23,16 @@ export function listProjectFiles(options: ListOptions): string[] {
   const filter = ignore().add(ALWAYS_EXCLUDED).add(options.exclude);
   const fromGit = gitFiles(options.root);
   const paths = fromGit ?? walkFiles(options.root, ignore().add(UNTRACKED_BUILD_DIRS).add(readGitignore(options.root)));
-  return paths.filter((path) => !filter.ignores(path) && existsSync(join(options.root, path))).sort();
+  return paths.filter((path) => !filter.ignores(path) && isRegularFile(join(options.root, path))).sort();
+}
+
+/** Drops deleted-but-tracked files and git submodules, which `git ls-files` lists as paths. */
+function isRegularFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
 }
 
 /** Tracked plus untracked-but-not-ignored files, or undefined outside a git work tree. */

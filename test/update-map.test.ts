@@ -129,3 +129,17 @@ test('the map folder is found from the project root, from inside it, and from a 
   assert.equal(MapFolder.find(join(root, 'src', 'deep'))?.dir, folder.dir);
   assert.equal(MapFolder.find(join(root, 'src', 'deep'))?.root, root);
 });
+
+test('directories listed as files (git submodules) are skipped, not read', async () => {
+  const { execFileSync } = await import('node:child_process');
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  mkdirSync(join(root, 'vendor', 'lib'), { recursive: true });
+  writeProject({ 'vendor/lib/x.ts': '' });
+  execFileSync('git', ['init', '-q'], { cwd: join(root, 'vendor', 'lib') });
+  execFileSync('git', ['-C', join(root, 'vendor', 'lib'), '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'x']);
+  execFileSync('git', ['add', '.'], { cwd: root });
+  const folder = MapFolder.create(join(root, 'codebase-map'), root);
+  const report = await updateMap(folder);
+  assert.ok(!report.added.includes('vendor/lib'));
+  assert.ok(report.added.includes('src/cart.ts'));
+});
