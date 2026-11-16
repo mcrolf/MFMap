@@ -1,21 +1,22 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { writeAgentsMdPointer } from './agents-md.ts';
-import { installClaudeHooks, uninstallClaudeHooks } from './hooks.ts';
+import { installHooks, parseAgents, uninstallHooks } from './hooks.ts';
+import { describePointerResults, writeInstructionPointers } from './instruction-pointer.ts';
 import { CONFIG_FILE, MapFolder } from './map/map-folder.ts';
 import { emptySummaries, SUMMARIES_FILE, type SummaryInput, SummaryBook } from './map/summaries.ts';
 import { INDEX_FILE, type UpdateReport, updateMap } from './map/update-map.ts';
 import type { MapIndex, Summaries } from './model.ts';
+import { plural } from './render/markdown.ts';
 import { writeMapOutputs } from './render/write-map.ts';
 import { watchProject } from './watch.ts';
 
 const USAGE = `mfmap: build and maintain an agent-readable map of a codebase.
 
 Usage:
-  mfmap init <folder> [--root <dir>] [--no-agents-md]
+  mfmap init <folder> [--root <dir>] [--no-pointer]
       Create the map in <folder> (relative to the project root), build it, and add a
-      pointer to the top of AGENTS.md when AGENTS.md exists.
+      pointer to the top of AGENTS.md and CLAUDE.md when they exist.
   mfmap update [--map <folder>] [--quiet]
       Re-scan and rewrite the map. Only files whose content changed are re-parsed.
   mfmap watch [--map <folder>]
@@ -24,10 +25,12 @@ Usage:
       List files and directories that need a new or refreshed summary.
   mfmap summaries set [--map <folder>] [--input <file.json>]
       Record summaries from JSON ({"files": {path: text}, "dirs": {path: text}}) on stdin or --input.
-  mfmap hooks install|uninstall [--map <folder>]
-      Add or remove Claude Code hooks (.claude/settings.local.json) that run update after edits.
-  mfmap agents-md [--map <folder>]
-      Add or refresh the map pointer at the top of AGENTS.md.
+  mfmap hooks install|uninstall [--agent claude,cursor,codex|all] [--map <folder>]
+      Add or remove hooks that run update after agent edits and at the end of each turn.
+      claude: .claude/settings.local.json  cursor: .cursor/hooks.json  codex: .codex/hooks.json
+      (default: claude). Codex asks you to trust new repo hooks once via /hooks.
+  mfmap pointer [--map <folder>]
+      Add or refresh the map pointer at the top of AGENTS.md and CLAUDE.md.
 
 Without --map, the map folder is found from the current directory (any folder holding ${CONFIG_FILE}).`;
 
@@ -42,7 +45,8 @@ async function main(argv: string[]): Promise<number> {
       limit: { type: 'string' },
       json: { type: 'boolean', default: false },
       quiet: { type: 'boolean', default: false },
-      'no-agents-md': { type: 'boolean', default: false },
+      agent: { type: 'string' },
+      'no-pointer': { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
   });
@@ -54,7 +58,7 @@ async function main(argv: string[]): Promise<number> {
 
   switch (command) {
     case 'init':
-      return init(subcommand, values.root, !values['no-agents-md']);
+      return init(subcommand, values.root, !values['no-pointer']);
     case 'update': {
       const report = await updateMap(openMap(values.map));
       if (!values.quiet) printReport(report);
@@ -68,14 +72,21 @@ async function main(argv: string[]): Promise<number> {
       throw new UsageError('summaries needs "pending" or "set".');
     case 'hooks': {
       const folder = openMap(values.map);
-      if (subcommand === 'install') console.log(`Installed Claude Code hooks in ${installClaudeHooks(folder.root, folder.dir)}`);
-      else if (subcommand === 'uninstall') console.log(`Removed mfmap hooks from ${uninstallClaudeHooks(folder.root) ?? 'nothing (no settings file)'}`);
-      else throw new UsageError('hooks needs "install" or "uninstall".');
+      const agents = parseAgents(values.agent);
+      if (subcommand === 'install') {
+        for (const path of installHooks(folder.root, folder.dir, agents)) console.log(`Installed hooks in ${path}`);
+        if (agents.includes('codex')) console.log('Codex: run /hooks in Codex once to review and trust the new repo hooks.');
+      } else if (subcommand === 'uninstall') {
+        const cleaned = uninstallHooks(folder.root, agents);
+        console.log(cleaned.length ? `Removed mfmap hooks from ${cleaned.join(', ')}` : 'No hook settings files found.');
+      } else {
+        throw new UsageError('hooks needs "install" or "uninstall".');
+      }
       return 0;
     }
-    case 'agents-md': {
+    case 'pointer': {
       const folder = openMap(values.map);
-      console.log(`AGENTS.md: ${writeAgentsMdPointer(folder.root, folder.relativeDir)}`);
+      console.log(describePointerResults(writeInstructionPointers(folder.root, folder.relativeDir)));
       return 0;
     }
     default:
@@ -92,7 +103,7 @@ function openMap(explicit: string | undefined): MapFolder {
   return found;
 }
 
-async function init(folderName: string | undefined, rootOption: string | undefined, linkAgentsMd: boolean): Promise<number> {
+async function init(folderName: string | undefined, rootOption: string | undefined, addPointer: boolean): Promise<number> {
   if (!folderName) throw new UsageError('init needs the name of the folder to hold the map, e.g. "mfmap init codebase-map".');
   const root = resolve(rootOption ?? process.cwd());
   const dir = isAbsolute(folderName) ? folderName : resolve(root, folderName);
@@ -101,8 +112,8 @@ async function init(folderName: string | undefined, rootOption: string | undefin
     throw new UsageError(`${dir} already exists and is not an mfmap folder. Choose another name.`);
   }
   const folder = existsSync(resolve(dir, CONFIG_FILE)) ? MapFolder.open(dir) : MapFolder.create(dir, root);
-  // The pointer goes in first so the map records AGENTS.md as it will stay.
-  if (linkAgentsMd) console.log(`AGENTS.md: ${writeAgentsMdPointer(folder.root, folder.relativeDir)}`);
+  // The pointer goes in first so the map records the instruction files as they will stay.
+  if (addPointer) console.log(describePointerResults(writeInstructionPointers(folder.root, folder.relativeDir)));
   printReport(await updateMap(folder));
   console.log(`Map entry point: ${resolve(dir, 'MAP.md')}`);
   return 0;
@@ -181,7 +192,9 @@ function printReport(report: UpdateReport): void {
   if (report.removed.length) parts.push(`${report.removed.length} removed`);
   console.log(`${parts.join(', ')}. ${report.written.length} map files rewritten.`);
   if (report.pendingFileSummaries + report.pendingDirSummaries > 0) {
-    console.log(`Summaries pending: ${report.pendingFileSummaries} files, ${report.pendingDirSummaries} directories ("mfmap summaries pending").`);
+    const files = plural(report.pendingFileSummaries, 'file');
+    const dirs = plural(report.pendingDirSummaries, 'directory', 'directories');
+    console.log(`Summaries pending: ${files}, ${dirs} ("mfmap summaries pending").`);
   }
 }
 

@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
-import { writeAgentsMdPointer } from '../src/agents-md.ts';
-import { installClaudeHooks, uninstallClaudeHooks } from '../src/hooks.ts';
+import { installHooks, uninstallHooks } from '../src/hooks.ts';
+import { writeInstructionPointers } from '../src/instruction-pointer.ts';
 import { MapFolder } from '../src/map/map-folder.ts';
 import { SummaryBook } from '../src/map/summaries.ts';
 import { updateMap } from '../src/map/update-map.ts';
@@ -85,13 +85,13 @@ test('summaries attach to the current content and go stale when the file changes
   assert.ok(report.pendingFileSummaries >= 1);
 });
 
-test('the AGENTS.md pointer goes at the top once and is refreshed in place', () => {
-  assert.equal(writeAgentsMdPointer(root, 'codebase-map'), 'no-agents-md');
-  writeProject({ 'AGENTS.md': '# Rules\n\nUse tabs.\n' });
+test('the pointer goes at the top of AGENTS.md and CLAUDE.md once and is refreshed in place', () => {
+  assert.deepEqual(writeInstructionPointers(root, 'codebase-map'), { 'AGENTS.md': 'missing', 'CLAUDE.md': 'missing' });
+  writeProject({ 'AGENTS.md': '# Rules\n\nUse tabs.\n', 'CLAUDE.md': '# Claude\n' });
 
-  assert.equal(writeAgentsMdPointer(root, 'codebase-map'), 'added');
-  assert.equal(writeAgentsMdPointer(root, 'codebase-map'), 'unchanged');
-  assert.equal(writeAgentsMdPointer(root, 'docs/map'), 'updated');
+  assert.deepEqual(writeInstructionPointers(root, 'codebase-map'), { 'AGENTS.md': 'added', 'CLAUDE.md': 'added' });
+  assert.deepEqual(writeInstructionPointers(root, 'codebase-map'), { 'AGENTS.md': 'unchanged', 'CLAUDE.md': 'unchanged' });
+  assert.deepEqual(writeInstructionPointers(root, 'docs/map'), { 'AGENTS.md': 'updated', 'CLAUDE.md': 'updated' });
   const text = readFileSync(join(root, 'AGENTS.md'), 'utf8');
   assert.ok(text.startsWith('<!-- mfmap:begin -->\n> **Codebase map:** for the location of anything'));
   assert.match(text, /\[`docs\/map\/MAP\.md`\]\(docs\/map\/MAP\.md\)/);
@@ -99,25 +99,46 @@ test('the AGENTS.md pointer goes at the top once and is refreshed in place', () 
   assert.ok(text.endsWith('# Rules\n\nUse tabs.\n'));
 });
 
-test('hook install is idempotent and uninstall keeps unrelated settings', () => {
-  writeProject({
-    '.claude/settings.local.json': JSON.stringify({
-      permissions: { allow: ['Bash(ls)'] },
-      hooks: { Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }] },
-    }),
-  });
-  installClaudeHooks(root, join(root, 'codebase-map'));
-  const path = installClaudeHooks(root, join(root, 'codebase-map'));
-  const installed = JSON.parse(readFileSync(path, 'utf8'));
-  assert.equal(installed.hooks.PostToolUse.length, 1);
-  assert.equal(installed.hooks.Stop.length, 2);
-  assert.match(installed.hooks.PostToolUse[0].hooks[0].command, /^MFMAP_HOOK=1 'node' .* update --quiet --map '.*codebase-map' \|\| true$/);
+test('a CLAUDE.md that imports AGENTS.md is not given a duplicate pointer', () => {
+  writeProject({ 'AGENTS.md': '# Rules\n', 'CLAUDE.md': '@AGENTS.md\n' });
+  assert.deepEqual(writeInstructionPointers(root, 'codebase-map'), { 'AGENTS.md': 'added', 'CLAUDE.md': 'imports AGENTS.md' });
+  assert.equal(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), '@AGENTS.md\n');
+});
 
-  uninstallClaudeHooks(root);
-  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), {
-    permissions: { allow: ['Bash(ls)'] },
-    hooks: { Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }] },
-  });
+test('hook install is idempotent per agent and uninstall keeps unrelated settings', () => {
+  const existing = {
+    '.claude/settings.local.json': { permissions: { allow: ['Bash(ls)'] }, hooks: { Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }] } },
+    '.cursor/hooks.json': { version: 1, hooks: { stop: [{ command: 'say done' }] } },
+    '.codex/hooks.json': { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }] } },
+  };
+  writeProject(Object.fromEntries(Object.entries(existing).map(([path, json]) => [path, JSON.stringify(json)])));
+  const mapDir = join(root, 'codebase-map');
+  installHooks(root, mapDir, ['claude', 'cursor', 'codex']);
+  installHooks(root, mapDir, ['claude', 'cursor', 'codex']);
+  const settings = (path: string) => JSON.parse(readFileSync(join(root, path), 'utf8'));
+
+  const claude = settings('.claude/settings.local.json');
+  assert.equal(claude.hooks.PostToolUse.length, 1);
+  assert.equal(claude.hooks.Stop.length, 2);
+  assert.match(claude.hooks.PostToolUse[0].hooks[0].command, /^MFMAP_HOOK=1; \[ -f .+ \] && node .+ update --quiet --map '.*codebase-map' >\/dev\/null 2>&1; echo '\{\}'$/);
+  const cursor = settings('.cursor/hooks.json');
+  assert.equal(cursor.version, 1);
+  assert.deepEqual([cursor.hooks.afterFileEdit.length, cursor.hooks.stop.length], [1, 2]);
+  assert.match(cursor.hooks.afterFileEdit[0].command, / --map 'codebase-map' /, 'committed Cursor hooks use a project-relative map path');
+  const codex = settings('.codex/hooks.json');
+  assert.equal(codex.hooks.PostToolUse[0].matcher, 'apply_patch|Edit|Write');
+  assert.equal(codex.hooks.Stop.length, 2);
+
+  uninstallHooks(root, ['claude', 'cursor', 'codex']);
+  for (const [path, json] of Object.entries(existing)) assert.deepEqual(settings(path), json);
+});
+
+test('the hook command always succeeds and prints JSON, even when the CLI is missing', async () => {
+  const { execFileSync } = await import('node:child_process');
+  installHooks(root, join(root, 'codebase-map'), ['codex']);
+  const command = JSON.parse(readFileSync(join(root, '.codex/hooks.json'), 'utf8')).hooks.Stop[0].hooks[0].command as string;
+  const broken = command.replace(/\[ -f [^\]]+\]/, "[ -f '/nonexistent/mfmap.mjs' ]");
+  assert.equal(execFileSync('sh', ['-c', broken], { cwd: root, encoding: 'utf8' }), '{}\n');
 });
 
 test('the map folder is found from the project root, from inside it, and from a subdirectory', () => {

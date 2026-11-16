@@ -21,12 +21,12 @@ Run `node skill/codebase-map/bin/mfmap.mjs --help` for the full list.
 
 | Command | What it does |
 | --- | --- |
-| `mfmap init <folder>` | Creates the map folder, builds the map, and adds a pointer to the top of `AGENTS.md` when it exists |
+| `mfmap init <folder>` | Creates the map folder, builds the map, and adds a pointer to the top of `AGENTS.md` and `CLAUDE.md` when they exist |
 | `mfmap update` | Re-parses only files whose content changed and rewrites only map files that changed |
 | `mfmap watch` | Updates the map as files change |
 | `mfmap summaries pending` / `set` | Lists missing or stale summaries; records new ones from JSON |
-| `mfmap hooks install` / `uninstall` | Claude Code hooks in `.claude/settings.local.json` that update after edits and when the agent stops |
-| `mfmap agents-md` | Adds or refreshes the `AGENTS.md` pointer |
+| `mfmap hooks install` / `uninstall` `--agent claude,cursor,codex\|all` | Hooks that update after agent edits and at the end of each turn (`.claude/settings.local.json`, `.cursor/hooks.json`, `.codex/hooks.json`) |
+| `mfmap pointer` | Adds or refreshes the pointer in `AGENTS.md` and `CLAUDE.md` |
 
 ## Map folder
 

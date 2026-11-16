@@ -1,6 +1,6 @@
 ---
 name: codebase-map
-description: Builds and maintains a map of where everything is in a codebase (files, symbols with line numbers, imports, importers, area dependencies, external packages, and one-line summaries) in a folder the user names, links it from the top of AGENTS.md, and keeps it current after files are added, removed, or changed. Use when the user asks to map a codebase, create, refresh, or update a codebase map, set up map hooks or a watcher, or when a project has an mfmap map (a folder with mfmap.json and MAP.md) and you changed files in it.
+description: Builds and maintains a map of where everything is in a codebase (files, symbols with line numbers, imports, importers, area dependencies, external packages, and one-line summaries) in a folder the user names, links it from the top of AGENTS.md and CLAUDE.md, and keeps it current after files are added, removed, or changed. Use when the user asks to map a codebase, create, refresh, or update a codebase map, set up map hooks or a watcher, or when a project has an mfmap map (a folder with mfmap.json and MAP.md) and you changed files in it.
 ---
 
 # Codebase Map
@@ -13,7 +13,7 @@ Run the CLI as `node <this skill's directory>/bin/mfmap.mjs <command>`. Below, `
 
 1. Check for an existing map first: `mfmap summaries pending --limit 1` succeeds when one exists. If one exists, go to **Updating a map**.
 2. Ask the user what to name the map folder. Suggest `codebase-map` and say it will be created at the project root (a nested path such as `docs/codebase-map` also works). Wait for the answer. Do not pick a name yourself.
-3. From the project root, run `mfmap init <folder>`. It builds the map and, when `AGENTS.md` exists, adds a pointer block at its very top telling agents to use the map for locating anything. It never creates `AGENTS.md`. If there is no `AGENTS.md` but there is a `CLAUDE.md` or similar agent instructions file, ask the user whether they want an `AGENTS.md` created (then run `mfmap agents-md`) before doing anything to the other file.
+3. From the project root, run `mfmap init <folder>`. It builds the map and adds a pointer block at the very top of `AGENTS.md` and `CLAUDE.md`, whichever exist, telling agents to use the map for locating anything. A `CLAUDE.md` that only imports `AGENTS.md` (`@AGENTS.md`) is left alone, since it already sees the pointer. It never creates either file; if neither exists, ask the user whether to create `AGENTS.md`, then run `mfmap pointer`.
 4. Write summaries (below).
 5. Offer automatic updates (below).
 6. Report: map location, file count, languages, summaries written, and which update mode is on.
@@ -50,7 +50,12 @@ Large projects: if more than 300 files are pending, tell the user the count and 
 ## Automatic updates
 
 Ask the user which they want, then set it up:
-- **Agent hook (Claude Code):** `mfmap hooks install` adds hooks to `.claude/settings.local.json` that run `mfmap update --quiet` after every file-editing tool call and when the agent stops (which also catches files changed through shell commands). The file is personal and not committed, because the command contains absolute paths. `mfmap hooks uninstall` removes only mfmap's hooks.
+- **Agent hooks:** ask which agents they use, then run `mfmap hooks install --agent <claude,cursor,codex|all>`. Each hook runs `mfmap update --quiet` after the agent edits a file and when it finishes a turn (which also catches files changed through shell commands). Hooks never fail the agent: they do nothing when the CLI is not installed and always print `{}`.
+  - claude: `.claude/settings.local.json`, personal and not committed.
+  - cursor: `.cursor/hooks.json`, project file meant to be committed; it locates the map relative to the project root and the CLI under `$HOME/.agents/skills` when installed there.
+  - codex: `.codex/hooks.json`, project file meant to be committed. Tell the user to run `/hooks` in Codex once to review and trust the new hooks, or they will not run.
+  - `mfmap hooks uninstall --agent ...` removes only mfmap's hooks and keeps everything else in those files.
+  - The hook commands use POSIX shell syntax (macOS, Linux, WSL).
 - **File watcher:** `mfmap watch` keeps the map current while anyone edits, for example in an IDE. It runs until stopped, so the user starts it in their own terminal or you start it as a background task if they ask.
 
 Hooks and the watcher keep structure current. Summaries still need an agent, so after a hook-driven update `MAP.md` reports how many summaries are pending.
