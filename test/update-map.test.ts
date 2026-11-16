@@ -1,0 +1,131 @@
+import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { afterEach, beforeEach, test } from 'node:test';
+import { writeAgentsMdPointer } from '../src/agents-md.ts';
+import { installClaudeHooks, uninstallClaudeHooks } from '../src/hooks.ts';
+import { MapFolder } from '../src/map/map-folder.ts';
+import { SummaryBook } from '../src/map/summaries.ts';
+import { updateMap } from '../src/map/update-map.ts';
+import type { MapIndex, Summaries } from '../src/model.ts';
+import { writeMapOutputs } from '../src/render/write-map.ts';
+
+let root: string;
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'mfmap-test-'));
+  writeProject({
+    'package.json': '{ "name": "shop", "dependencies": { "express": "^4.0.0" } }',
+    'src/server.ts': "import express from 'express';\nimport { cartTotal } from './cart';\nexport const app = express();\n",
+    'src/cart.ts': 'export function cartTotal(items: number[]): number { return items.reduce((a, b) => a + b, 0); }\n',
+    'README.md': '# Shop\n',
+  });
+});
+
+afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+function writeProject(files: Record<string, string>): void {
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), content);
+  }
+}
+
+const read = (folder: MapFolder, name: string) => readFileSync(folder.path(name), 'utf8');
+
+test('a new map lists files, symbols, resolved imports, importers, and declared packages', async () => {
+  const folder = MapFolder.create(join(root, 'codebase-map'), root);
+  const report = await updateMap(folder);
+
+  assert.equal(report.fileCount, 4);
+  assert.deepEqual(report.added.sort(), ['README.md', 'package.json', 'src/cart.ts', 'src/server.ts']);
+  assert.match(read(folder, 'symbols.tsv'), /^cartTotal\tfunction\tsrc\/cart\.ts\t1\t/m);
+  assert.match(read(folder, 'edges.tsv'), /^src\/server\.ts\tsrc\/cart\.ts\tfile\tcartTotal$/m);
+  assert.match(read(folder, 'edges.tsv'), /^src\/server\.ts\texpress\texternal\tdefault$/m);
+  const page = read(folder, 'modules/_root.md');
+  assert.match(page, /## `src\/cart\.ts`[\s\S]*Imported by: `src\/server\.ts`/);
+  assert.match(read(folder, 'MAP.md'), /express \^4\.0\.0 · 1 file/);
+  assert.doesNotMatch(read(folder, 'files.tsv'), /codebase-map\//, 'the map folder never maps itself');
+});
+
+test('an update re-parses only changed files and drops removed files', async () => {
+  const folder = MapFolder.create(join(root, 'codebase-map'), root);
+  await updateMap(folder);
+
+  writeProject({ 'src/cart.ts': 'export function cartTotal() { return 0; }\nexport function applyCoupon() {}\n' });
+  rmSync(join(root, 'README.md'));
+  writeProject({ 'src/coupon.ts': "import { applyCoupon } from './cart';\n" });
+  const report = await updateMap(folder);
+
+  assert.deepEqual(report.changed, ['src/cart.ts']);
+  assert.deepEqual(report.added, ['src/coupon.ts']);
+  assert.deepEqual(report.removed, ['README.md']);
+  assert.match(read(folder, 'symbols.tsv'), /^applyCoupon\tfunction\tsrc\/cart\.ts\t2\t/m);
+  assert.doesNotMatch(read(folder, 'files.tsv'), /README\.md/);
+
+  const again = await updateMap(folder);
+  assert.deepEqual([again.added, again.changed, again.removed, again.written], [[], [], [], []]);
+});
+
+test('summaries attach to the current content and go stale when the file changes', async () => {
+  const folder = MapFolder.create(join(root, 'codebase-map'), root);
+  await updateMap(folder);
+  const index = folder.readJson<MapIndex>('index.json')!;
+  const book = new SummaryBook({ files: {}, dirs: {} }, index);
+  assert.deepEqual(book.apply({ files: { 'src/cart.ts': 'Sums cart line items.' }, dirs: { 'src/': 'Shop server.' } }), []);
+  writeMapOutputs(folder, index, book);
+  assert.match(read(folder, 'files.tsv'), /src\/cart\.ts\tcode\tTypeScript\t1\t_root\.md\tSums cart line items\.$/m);
+
+  writeProject({ 'src/cart.ts': 'export const cartTotal = () => 1;\n' });
+  const report = await updateMap(folder);
+  assert.match(read(folder, 'files.tsv'), /Sums cart line items\. \(summary may be outdated\)/);
+  const stored = folder.readJson<Summaries>('summaries.json')!;
+  assert.equal(stored.files['src/cart.ts'].summary, 'Sums cart line items.');
+  assert.ok(report.pendingFileSummaries >= 1);
+});
+
+test('the AGENTS.md pointer goes at the top once and is refreshed in place', () => {
+  assert.equal(writeAgentsMdPointer(root, 'codebase-map'), 'no-agents-md');
+  writeProject({ 'AGENTS.md': '# Rules\n\nUse tabs.\n' });
+
+  assert.equal(writeAgentsMdPointer(root, 'codebase-map'), 'added');
+  assert.equal(writeAgentsMdPointer(root, 'codebase-map'), 'unchanged');
+  assert.equal(writeAgentsMdPointer(root, 'docs/map'), 'updated');
+  const text = readFileSync(join(root, 'AGENTS.md'), 'utf8');
+  assert.ok(text.startsWith('<!-- mfmap:begin -->\n> **Codebase map:** for the location of anything'));
+  assert.match(text, /\[`docs\/map\/MAP\.md`\]\(docs\/map\/MAP\.md\)/);
+  assert.equal(text.match(/mfmap:begin/g)?.length, 1);
+  assert.ok(text.endsWith('# Rules\n\nUse tabs.\n'));
+});
+
+test('hook install is idempotent and uninstall keeps unrelated settings', () => {
+  writeProject({
+    '.claude/settings.local.json': JSON.stringify({
+      permissions: { allow: ['Bash(ls)'] },
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }] },
+    }),
+  });
+  installClaudeHooks(root, join(root, 'codebase-map'));
+  const path = installClaudeHooks(root, join(root, 'codebase-map'));
+  const installed = JSON.parse(readFileSync(path, 'utf8'));
+  assert.equal(installed.hooks.PostToolUse.length, 1);
+  assert.equal(installed.hooks.Stop.length, 2);
+  assert.match(installed.hooks.PostToolUse[0].hooks[0].command, /^MFMAP_HOOK=1 'node' .* update --quiet --map '.*codebase-map' \|\| true$/);
+
+  uninstallClaudeHooks(root);
+  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), {
+    permissions: { allow: ['Bash(ls)'] },
+    hooks: { Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }] },
+  });
+});
+
+test('the map folder is found from the project root, from inside it, and from a subdirectory', () => {
+  const folder = MapFolder.create(join(root, 'docs', 'codebase-map'), root);
+  writeProject({ 'src/deep/file.ts': '' });
+  mkdirSync(join(root, '.git'));
+  assert.equal(MapFolder.find(root)?.dir, folder.dir);
+  assert.equal(MapFolder.find(folder.dir)?.dir, folder.dir);
+  assert.equal(MapFolder.find(join(root, 'src', 'deep'))?.dir, folder.dir);
+  assert.equal(MapFolder.find(join(root, 'src', 'deep'))?.root, root);
+});
