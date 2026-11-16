@@ -62,6 +62,7 @@ function howToFind(mapDir: string): string {
     `| Where a symbol is defined | ${code(`grep -P '^Name\\t' ${mapDir ? `${mapDir}/` : ''}symbols.tsv`)} (name, kind, path, line, end line, container, visibility, extends) |`,
     `| What a file imports, and who imports it | The file's section on its area page, or ${code(`grep -P '\\tpath/to/file\\t' ${mapDir ? `${mapDir}/` : ''}edges.tsv`)} |`,
     `| Who uses a third-party package | ${code(`grep -P '\\tpackage-name\\texternal' ${mapDir ? `${mapDir}/` : ''}edges.tsv`)} |`,
+    `| A picture of how files and folders connect | Open ${at('graph.html')} in a browser (interactive network graph) |`,
     `| Everything, machine-readable | ${at('index.json')} |`,
   ].join('\n');
 }

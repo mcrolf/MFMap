@@ -1,5 +1,6 @@
 // Bundles the CLI into skill/codebase-map/bin/mfmap.mjs and copies the tree-sitter runtime and the grammars
-// the registered languages use into bin/grammars/. Run with: npm run build
+// the registered languages use into bin/grammars/, and bundles the graph viewer into bin/viewer.js.
+// Run with: npm run build
 import { build } from 'esbuild';
 import { chmodSync, copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -21,6 +22,8 @@ await build({
   format: 'esm',
   target: 'node20',
   legalComments: 'none',
+  // The bundled CLI reads viewer.js from beside itself; esbuild is only used when running from source.
+  external: ['esbuild'],
   // web-tree-sitter is CommonJS that calls require() and reads __dirname.
   banner: {
     js: [
@@ -36,6 +39,16 @@ await build({
 });
 
 chmodSync(join(outDir, 'mfmap.mjs'), 0o755);
+
+await build({
+  entryPoints: ['src/viewer/main.ts'],
+  outfile: join(outDir, 'viewer.js'),
+  bundle: true,
+  format: 'iife',
+  minify: true,
+  target: 'es2020',
+  legalComments: 'none',
+});
 copyFileSync(require.resolve('web-tree-sitter/tree-sitter.wasm'), join(grammarDir, 'tree-sitter.wasm'));
 const grammarSource = join(dirname(require.resolve('tree-sitter-wasms/package.json')), 'out');
 for (const grammar of new Set(LANGUAGES.map((language) => language.grammar))) {

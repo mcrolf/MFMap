@@ -16,7 +16,7 @@ Run the CLI as `node <this skill's directory>/bin/mfmap.mjs <command>`. Below, `
 3. From the project root, run `mfmap init <folder>`. It builds the map and adds a pointer block at the very top of `AGENTS.md` and `CLAUDE.md`, whichever exist, telling agents to use the map for locating anything. A `CLAUDE.md` that only imports `AGENTS.md` (`@AGENTS.md`) is left alone, since it already sees the pointer. It never creates either file; if neither exists, ask the user whether to create `AGENTS.md`, then run `mfmap pointer`.
 4. Write summaries (below).
 5. Offer automatic updates (below).
-6. Report: map location, file count, languages, summaries written, and which update mode is on.
+6. Report: map location, file count, languages, summaries written, which update mode is on, and the interactive graph (`<folder>/graph.html`; `mfmap graph --open` opens it).
 
 ## Writing summaries
 
@@ -66,6 +66,7 @@ Read `<folder>/MAP.md` first. It explains the other files:
 - `MAP.md`: layout tree with directory summaries, entry points, most-imported files, area-to-area dependencies, external packages per manifest, and how to search.
 - `modules/<area>.md`: per area, each file's summary, symbols with line numbers, imports (with imported names), and importers.
 - `symbols.tsv`, `files.tsv`, `edges.tsv`: one record per line for grep (`grep -P '^SessionStore\t' <folder>/symbols.tsv`).
+- `graph.html`: an interactive network graph for people: files or folders as nodes colored by area, imports as arrows, search, a details panel per node, a table view, and dark mode. It works offline and is rewritten on every update; `mfmap graph --open` opens it.
 - `index.json`: everything, one file per line; `summaries.json`: the summaries; `mfmap.json`: settings (`exclude` patterns, `areaFileLimit`).
 
 Never edit generated map files by hand; change `mfmap.json` or summaries and run `mfmap update`.

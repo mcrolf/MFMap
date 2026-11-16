@@ -16,7 +16,7 @@ import { emptySummaries, SUMMARIES_FILE, SummaryBook } from './summaries.ts';
 export const INDEX_FILE = 'index.json';
 const STAT_CACHE_FILE = '.cache/stat.json';
 /** Bump when extraction output changes shape, so cached entries are re-parsed. */
-const EXTRACTOR_VERSION = 1;
+const EXTRACTOR_VERSION = 2;
 
 interface StatCache {
   extractorVersion: number;
@@ -85,7 +85,7 @@ export async function updateMap(folder: MapFolder): Promise<UpdateReport> {
   const summaries = new SummaryBook(folder.readJson<Summaries>(SUMMARIES_FILE) ?? emptySummaries(), index);
   summaries.pruneRemoved();
 
-  const written = writeMapOutputs(folder, index, summaries);
+  const written = await writeMapOutputs(folder, index, summaries);
   if (folder.writeIfChanged(INDEX_FILE, serializeIndex(index))) written.push(INDEX_FILE);
   folder.writeJson(STAT_CACHE_FILE, { extractorVersion: EXTRACTOR_VERSION, files: nextStats } satisfies StatCache);
   const pending = summaries.pending();

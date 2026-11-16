@@ -47,6 +47,12 @@ test('a new map lists files, symbols, resolved imports, importers, and declared 
   assert.match(page, /## `src\/cart\.ts`[\s\S]*Imported by: `src\/server\.ts`/);
   assert.match(read(folder, 'MAP.md'), /express \^4\.0\.0 · 1 file/);
   assert.doesNotMatch(read(folder, 'files.tsv'), /codebase-map\//, 'the map folder never maps itself');
+
+  const graph = read(folder, 'graph.html');
+  const data = JSON.parse(graph.match(/<script type="application\/json" id="map-data">(.*?)<\/script>/s)![1]);
+  const index = (path: string) => data.files.findIndex((file: { path: string }) => file.path === path);
+  assert.deepEqual(data.links, [[index('src/server.ts'), index('src/cart.ts'), ['cartTotal']]]);
+  assert.deepEqual(data.externals, [{ name: 'express', files: [index('src/server.ts')] }]);
 });
 
 test('an update re-parses only changed files and drops removed files', async () => {
@@ -74,7 +80,7 @@ test('summaries attach to the current content and go stale when the file changes
   const index = folder.readJson<MapIndex>('index.json')!;
   const book = new SummaryBook({ files: {}, dirs: {} }, index);
   assert.deepEqual(book.apply({ files: { 'src/cart.ts': 'Sums cart line items.' }, dirs: { 'src/': 'Shop server.' } }), []);
-  writeMapOutputs(folder, index, book);
+  await writeMapOutputs(folder, index, book);
   assert.match(read(folder, 'files.tsv'), /src\/cart\.ts\tcode\tTypeScript\t1\t_root\.md\tSums cart line items\.$/m);
 
   writeProject({ 'src/cart.ts': 'export const cartTotal = () => 1;\n' });

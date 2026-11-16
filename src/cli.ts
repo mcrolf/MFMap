@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -8,7 +9,7 @@ import { emptySummaries, SUMMARIES_FILE, type SummaryInput, SummaryBook } from '
 import { INDEX_FILE, type UpdateReport, updateMap } from './map/update-map.ts';
 import type { MapIndex, Summaries } from './model.ts';
 import { plural } from './render/markdown.ts';
-import { writeMapOutputs } from './render/write-map.ts';
+import { GRAPH_PAGE, writeMapOutputs } from './render/write-map.ts';
 import { watchProject } from './watch.ts';
 
 const USAGE = `mfmap: build and maintain an agent-readable map of a codebase.
@@ -19,6 +20,9 @@ Usage:
       pointer to the top of AGENTS.md and CLAUDE.md when they exist.
   mfmap update [--map <folder>] [--quiet]
       Re-scan and rewrite the map. Only files whose content changed are re-parsed.
+  mfmap graph [--map <folder>] [--open]
+      Update the map and print the path of graph.html, an interactive network view of files,
+      folders, and imports. --open opens it in the default browser.
   mfmap watch [--map <folder>]
       Keep the map updated while files change.
   mfmap summaries pending [--map <folder>] [--json] [--limit <n>]
@@ -44,6 +48,7 @@ async function main(argv: string[]): Promise<number> {
       input: { type: 'string' },
       limit: { type: 'string' },
       json: { type: 'boolean', default: false },
+      open: { type: 'boolean', default: false },
       quiet: { type: 'boolean', default: false },
       agent: { type: 'string' },
       'no-pointer': { type: 'boolean', default: false },
@@ -64,6 +69,8 @@ async function main(argv: string[]): Promise<number> {
       if (!values.quiet) printReport(report);
       return 0;
     }
+    case 'graph':
+      return showGraph(openMap(values.map), values.open);
     case 'watch':
       return watchMap(openMap(values.map));
     case 'summaries':
@@ -119,6 +126,20 @@ async function init(folderName: string | undefined, rootOption: string | undefin
   return 0;
 }
 
+async function showGraph(folder: MapFolder, open: boolean): Promise<number> {
+  await updateMap(folder);
+  const page = folder.path(GRAPH_PAGE);
+  console.log(page);
+  if (open) openInBrowser(page);
+  return 0;
+}
+
+function openInBrowser(path: string): void {
+  const [command, args] =
+    process.platform === 'darwin' ? ['open', [path]] : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', path]] : ['xdg-open', [path]];
+  spawn(command, args, { detached: true, stdio: 'ignore' }).unref();
+}
+
 function watchMap(folder: MapFolder): Promise<number> {
   console.log(`Watching ${folder.root} (Ctrl+C to stop).`);
   return new Promise(() => {
@@ -165,7 +186,7 @@ async function setSummaries(folder: MapFolder, inputPath: string | undefined): P
   if (!index) throw new UsageError('The map has not been built yet. Run "mfmap update" first.');
   const book = new SummaryBook(folder.readJson<Summaries>(SUMMARIES_FILE) ?? emptySummaries(), index);
   const unknown = book.apply(input);
-  writeMapOutputs(folder, index, book);
+  await writeMapOutputs(folder, index, book);
   const pending = book.pending();
   const recorded = Object.keys(input.files ?? {}).length + Object.keys(input.dirs ?? {}).length - unknown.length;
   console.log(`Recorded ${recorded} summaries. Still pending: ${pending.files.length} files, ${pending.dirs.length} directories.`);

@@ -30,8 +30,10 @@ const CONFIG_EXTENSIONS = new Set([
   '.json', '.jsonc', '.yaml', '.yml', '.toml', '.xml', '.ini', '.env', '.lock', '.gradle', '.csproj', '.sln', '.plist',
   '.xcconfig', '.pbxproj', '.tf',
 ]);
+/** Data files: listed, never treated as code. */
+const DATA_EXTENSIONS = new Set(['.csv']);
 const CODE_EXTENSIONS = new Set(Object.keys(FILE_TYPES).filter(
-  (ext) => !DOC_EXTENSIONS.has(ext) && !ASSET_EXTENSIONS.has(ext) && !CONFIG_EXTENSIONS.has(ext),
+  (ext) => !DOC_EXTENSIONS.has(ext) && !ASSET_EXTENSIONS.has(ext) && !CONFIG_EXTENSIONS.has(ext) && !DATA_EXTENSIONS.has(ext),
 ));
 
 const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|spec|specs|testing|e2e|src\/test)\/|\.(test|spec|e2e)\.[cm]?[jt]sx?$|_test\.(go|py)$|(^|\/)test_[^/]+\.py$|Tests?\.(swift|kt|java|cs)$/;

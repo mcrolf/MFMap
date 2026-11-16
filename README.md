@@ -23,6 +23,7 @@ Run `node skill/codebase-map/bin/mfmap.mjs --help` for the full list.
 | --- | --- |
 | `mfmap init <folder>` | Creates the map folder, builds the map, and adds a pointer to the top of `AGENTS.md` and `CLAUDE.md` when they exist |
 | `mfmap update` | Re-parses only files whose content changed and rewrites only map files that changed |
+| `mfmap graph [--open]` | Updates the map and opens `graph.html`, the interactive network graph |
 | `mfmap watch` | Updates the map as files change |
 | `mfmap summaries pending` / `set` | Lists missing or stale summaries; records new ones from JSON |
 | `mfmap hooks install` / `uninstall` `--agent claude,cursor,codex\|all` | Hooks that update after agent edits and at the end of each turn (`.claude/settings.local.json`, `.cursor/hooks.json`, `.codex/hooks.json`) |
@@ -35,6 +36,7 @@ Run `node skill/codebase-map/bin/mfmap.mjs --help` for the full list.
 | `MAP.md` | Entry point: layout with directory summaries, entry points, most-imported files, area dependencies, external packages, search recipes |
 | `modules/<area>.md` | Per area: each file's summary, symbols with line numbers, imports with names, importers |
 | `symbols.tsv`, `files.tsv`, `edges.tsv` | One record per line, for grep |
+| `graph.html` | Interactive network graph (offline, single file): files or folders by area, import arrows, search, details panel, table view |
 | `index.json` | Full model, one file per line |
 | `summaries.json` | Agent-written summaries keyed by content hash |
 | `mfmap.json` | Settings: `exclude` (gitignore-style patterns) and `areaFileLimit` |
