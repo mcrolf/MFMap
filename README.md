@@ -44,3 +44,5 @@ Run `node skill/codebase-map/bin/mfmap.mjs --help` for the full list.
 ## Development
 
 `src/languages/` holds one plugin per language (an extractor over the tree-sitter syntax tree) and one resolver per ecosystem. `scripts/dump-tree.mjs <grammar> <file>` prints a grammar's node types when writing an extractor.
+
+after changing `src/`, run `npm run build` and commit `bin/` with the change, so the bundle never goes stale.
